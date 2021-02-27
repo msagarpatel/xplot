@@ -26,21 +26,8 @@ dnl Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE
 AC_HEADER_STDC
 AC_HEADER_TIME
+
 AC_STRUCT_TM
-
-AC_DEFUN(AC_TM_GMTOFF,
-[AC_MSG_CHECKING([whether struct tm has tm_gmtoff])
-AC_CACHE_VAL(ac_cv_tm_gmtoff,
-[AC_TRY_COMPILE([#include <sys/types.h>
-#include <time.h>],
-[struct tm *tp; tp->tm_gmtoff;],
-  ac_cv_tm_gmtoff=yes, ac_cv_tm_gmtoff=0)])dnl
-AC_MSG_RESULT($ac_cv_tm_gmtoff)
-if test $ac_cv_tm_gmtoff = yes; then
-  AC_DEFINE(TM_GMTOFF)
-fi
-])
-
 AC_TM_GMTOFF
 
 dnl Checks for library functions.

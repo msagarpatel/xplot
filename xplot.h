@@ -36,6 +36,28 @@ to preserve same.
 
 #include "config.h"
 
+#ifdef HAVE_LIBX11
+#include <X11/Xos.h>
+#else
+#error xplot requires X11
+#endif
+
+#ifdef STDC_HEADERS
+#include <stdlib.h>
+#else
+#include <malloc.h>
+#endif
+
+#ifdef HAVE_LIBM
+#include <math.h>
+#ifdef ultrix
+double rint();     /* YMUL! some versions of ultrix omit this from math.h! */
+#endif
+#else
+#error xplot requires libm/math.h
+#endif
+
+/* Coordinate type definitions */
 typedef union coord_u {
   int i;
   unsigned int u;
@@ -45,8 +67,11 @@ typedef union coord_u {
 
 typedef enum { U_INT, INT, TIMEVAL, DOUBLE, DTIME} coord_type;
 
-#ifdef ultrix
-double rint();     /* YMUL! some versions of ultrix omit this from math.h! */
-#endif
+#include "coord.h"
+
+
+/* prototypes */
+void panic(char *s);
+void fatalerror(char *s);
 
 #endif

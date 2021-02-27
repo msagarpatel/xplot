@@ -42,18 +42,22 @@ LIBS= @LIBS@
 
 INSTALL = @INSTALL@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
+INSTALL_DATA = @INSTALL_DATA@
+INSTALL_MAN = @INSTALL_DATA@
 
 prefix = @prefix@
 
 exec_prefix = @exec_prefix@
 
 bindir = $(exec_prefix)/bin
-
+mandir = $(exec_prefix)/man/man1
 
 CFILES= xplot.c version_string.c coord.c unsigned.c signed.c timeval.c double.c dtime.c
 OFILES= xplot.o version_string.o coord.o unsigned.o signed.o timeval.o double.o dtime.o
 
 PROG= xplot
+
+MANFILES= xplot.1 tcpdump2xplot.1
 
 all:	${PROG}
 
@@ -66,8 +70,11 @@ version_string.c: version
 	echo 'char *version_string = "'`cat version`'";' >version_string.c
 
 install: all
+	mkdir -p $(bindir)
 	$(INSTALL_PROGRAM) xplot $(bindir)/xplot
-
+	$(INSTALL) tcpdump2xplot.pl $(bindir)/tcpdump2xplot
+	mkdir -p $(mandir)
+	$(INSTALL_MAN) $(MANFILES) $(mandir)
 clean:
 	rm -f ${PROG} ${PROG}.old *.o version_string.c
 

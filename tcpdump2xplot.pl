@@ -1,4 +1,4 @@
-#!/usr/local/bin/perl
+#!/usr/bin/env perl
 # -*- Perl -*-
 #
 # Copyright 1996 Massachusetts Institute of Technology
@@ -40,6 +40,7 @@ $Cumulative = 0;
 $TimeConvert = 0;
 $ForceRelative = 0;
 $FinThreshold = 1; # seconds
+$GzipOutput = 0;
 
 # other initializations
 #$Packets;
@@ -99,6 +100,8 @@ sub ReadArg
 	$ForceRelative = 1;
     } elsif ($arg eq 'q') {
 	$Quiet = 1;
+    } elsif ($arg eq 'z') {
+	$GzipOutput = 1;
     } else {
 	&usage();
         print "unknown argument \"$arg\".\n";
@@ -136,7 +139,11 @@ sub newConversation
 
     # create Xplot file from template
     $XplotName{$from} = eval($PlotTemplate);
-    open($from, ">$XplotName{$from}") || die "error opening \"$from\" for writing: $!\n";
+    if ($GzipOutput) {
+	open($from, "|gzip >$XplotName{$from}.gz") || die "error opening gzip pipe  to \"$from\".gz for writing: $!\n";
+    } else { 
+	open($from, ">$XplotName{$from}") || die "error opening \"$from\" for writing: $!\n";
+    }
     print $from "timeval signed\ntitle\n$from-->$to\n";
 
     # initialize conversation
@@ -202,7 +209,11 @@ sub removeFrom
 
 while (@ARGV[0] =~ /^-/ && &ReadArg(shift(@ARGV))) {}
 if (($inputFile = shift(@ARGV))) {
-    open (TCPDUMP, "<$inputFile") || die "error opening \"$inputFile\" for reading: $!\n";
+    if ($inputFile =~ /.*\.gz$/) {
+	open (TCPDUMP, "zcat $inputFile|") || die "error opening \"$inputFile\" for reading: $!\n";	
+    } else {
+	open (TCPDUMP, "<$inputFile") || die "error opening \"$inputFile\" for reading: $!\n";
+    }
     $Tcpdump = 'TCPDUMP';
 }
 
@@ -233,11 +244,12 @@ for ($lineNo = 1; <$Tcpdump>; $lineNo++) {
     &newConversation($from, $to, $time) if (!(defined($StartTime{$from})));
 
     $opts =~ s/^.*<//;
-    $opts =~ s/>//;
+    $opts =~ s/>.*//;
     @opts = split(/,/,$opts);
 
     for ($i = 0; $i <= $#opts; $i++) {
 	local(@opt);
+	$opts[$i] =~ s/^ sack/sack/;  # some tcpdumps put a stray space at the beginning of "sack" 
 	@opt = split(/ /,$opts[$i]);
 	if ($opt[0] =~ /nop/ || $opt[0] =~ /eol/) {
 	    next;
@@ -387,6 +399,19 @@ for ($lineNo = 1; <$Tcpdump>; $lineNo++) {
 		local(@sacks);
 		local($i);
 
+                # munge newer tcpdump format for SACK so that it looks
+                # just just like my old format
+
+		$sacks =~ s/\{/ /g;
+		$sacks =~ s/\}/ /g;
+
+		# print stderr "SACKS before: $sacks \n";
+
+		$sacks =~ s/^sack [123]  //;
+		$sacks =~ s/^[123]  //;
+
+		# print stderr "SACKS after : $sacks \n";
+
 		@sacks = split(/ /, $sacks);
 		
 		for ($i = 0; $i <= $#sacks; $i++) {
@@ -397,14 +422,20 @@ for ($lineNo = 1; <$Tcpdump>; $lineNo++) {
 		    $start = $1;
 		    $end = $2;
 
+		    # print stderr "SACK start $start end $end \n";
+
 		    if ($Cumulative) {
 			# yikes! what to do?
 		    } else {
 			# adjust sequence number to be relative to start of conversation.
+			# print stderr "SACK relative to $FirstSeq{$to.'-'.$from} \n";
+
 			$start -= $FirstSeq{$to.'-'.$from};
 			$end -= $FirstSeq{$to.'-'.$from};
 
-			print $to "line $time $start $time $end green\n"
+			# print stderr "SACK line $time $start $time $end green\n";
+			print $to "line $time $start $time $end green\n";
+
 		    }
 		}
 	    }
@@ -440,7 +471,7 @@ foreach $from (@Froms) {
     &closeOut($from);
 }
 print "summary: $TotalPackets packets $TotalBytes bytes took ", &subTimes($MaxLast, $MinFirst), 
-    " efficiency: ", $TotalBytes/($TotalBytes + $TotalPackets*40), "\n" if (!Queit);
+    " efficiency: ", $TotalBytes/($TotalBytes + $TotalPackets*40), "\n" if (!Quiet);
 
 print $ListFile "summary: $TotalPackets $TotalBytes ",
     &subTimes($MaxLast, $MinFirst), " ", $TotalBytes/($TotalBytes + $TotalPackets*40), "\n" if ($ListFile);

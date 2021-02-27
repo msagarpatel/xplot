@@ -30,23 +30,17 @@ the software.  Title to copyright in this software and any associated
 documentation shall at all times remain with M.I.T., and USER agrees
 to preserve same.
 */
-#include <X11/Xos.h>
-#include <math.h>
-#include <malloc.h>
-#include <stdio.h>
 #include "xplot.h"
-#include "coord.h"
+#include <stdio.h>
 
 char *signed_unparse(coord c)
 {
-  extern void panic();
-
   char *r;
   char buf[50];
   (void) sprintf(buf,"%d",c.i);
   r = malloc((unsigned) strlen(buf)+1);
   if (r == 0)
-    panic("malloc returned 0");
+    fatalerror("malloc returned 0");
   (void) strcpy(r, buf);
   return r;
 }

@@ -113,6 +113,12 @@ postscript plot just like the middle button, but it will take less
 vertical space.  Again, you can fiddle with the constants in emit_PS()
 and recompile if you don't like these sizes.
 
+X Resources
+-----------
+
+xplot understands the standard geometry, foreground, and background resource
+settings.
+
 ---------
 
 Good luck.

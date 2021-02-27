@@ -30,9 +30,7 @@ the software.  Title to copyright in this software and any associated
 documentation shall at all times remain with M.I.T., and USER agrees
 to preserve same.
 */
-#include <X11/Xos.h>
 #include "xplot.h"
-#include "coord.h"
 
 extern struct coord_impl unsigned_impl;
 extern struct coord_impl signed_impl;
@@ -140,7 +138,7 @@ void cticks(coord_type ctype, coord first, coord last, int horizontal,
     step = impls[(int)ctype]->tick(sublevel);
     at = impls[(int)ctype]->round_up(first, step);
     
-    for (subcount = 1; ; subcount++) {
+    for (subcount = 1; subcount - count <= maxextrasubticks; subcount++) {
       at = impls[(int)ctype]->add(at, step);
       if (impls[(int)ctype]->cmp(at, last) > 0)
 	break;

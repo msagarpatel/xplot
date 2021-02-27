@@ -30,13 +30,9 @@ the software.  Title to copyright in this software and any associated
 documentation shall at all times remain with M.I.T., and USER agrees
 to preserve same.
 */
-#include <X11/Xos.h>
-#include <math.h>
-#include <malloc.h>
+#include "xplot.h"
 #include <stdio.h>
 #include <ctype.h>
-#include "xplot.h"
-#include "coord.h"
 
 inline static
 void
@@ -59,7 +55,6 @@ char *timeval_unparse(coord c)
   char *cp;
   char *r;
   char buf[50];
-  extern void panic();
   struct tm *tmp;
   
   tmp = localtime((time_t *) &(c.t.tv_sec));
@@ -86,7 +81,7 @@ char *timeval_unparse(coord c)
   }
   r = malloc((unsigned) strlen(cp)+1);
   if (r == 0)
-    panic("malloc returned 0");
+    fatalerror("malloc returned 0");
   (void) strcpy(r, cp);
   return r;
 }
@@ -174,7 +169,7 @@ coord timeval_round_down(coord c1, coord c2)
 
   tmp = localtime((time_t *) &(c1.t.tv_sec));
 
-#ifdef TM_GMTOFF
+#ifdef HAVE_TM_GMTOFF
   c1.t.tv_sec += tmp->tm_gmtoff;
 #endif
   
@@ -186,7 +181,7 @@ coord timeval_round_down(coord c1, coord c2)
     r.t.tv_sec = c1.t.tv_sec - (c1.t.tv_sec % c2.t.tv_sec);
   }
 
-#ifdef TM_GMTOFF
+#ifdef HAVE_TM_GMTOFF
   r.t.tv_sec -= tmp->tm_gmtoff;
 #endif
 
@@ -202,7 +197,7 @@ coord timeval_round_up(coord c1, coord c2)
 
   tmp = localtime((time_t *) &(c1.t.tv_sec));
 
-#ifdef TM_GMTOFF
+#ifdef HAVE_TM_GMTOFF
   c1.t.tv_sec += tmp->tm_gmtoff;
 #endif
   
@@ -226,7 +221,7 @@ coord timeval_round_up(coord c1, coord c2)
       r.t.tv_sec = c1.t.tv_sec + (c2.t.tv_sec - (c1.t.tv_sec % c2.t.tv_sec));
   }
 
-#ifdef TM_GMTOFF
+#ifdef HAVE_TM_GMTOFF
   r.t.tv_sec -= tmp->tm_gmtoff;
 #endif
 
@@ -303,8 +298,6 @@ static struct tick_table_s {
 coord timeval_tick(int level)
 {
   coord r;
-  extern void panic();
-
 
   if (level < 0 || level >= sizeof(tick_table) / sizeof(struct tick_table_s))
     panic("timeval_tick: level too large");
@@ -318,7 +311,6 @@ coord timeval_tick(int level)
 int timeval_subtick(int level)
 {
   int r;
-  extern void panic();
 
   if (level < 0 || level >= sizeof(tick_table) / sizeof(struct tick_table_s))
     panic("timeval_subtick: level too large");

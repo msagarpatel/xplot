@@ -39,16 +39,18 @@ to preserve same.
  by Shawn D. Ostermann (@cs.ohiou.edu).   
 */
 
+#include "xplot.h"
 #include <stdio.h>
-#include <X11/Xos.h>
+
+#ifdef HAVE_LIBX11
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/cursorfont.h>
-#include <math.h>
+#else
+#error xplot requires x11
+#endif
+
 #include <ctype.h>
-#include <malloc.h>
-#include "xplot.h"
-#include "coord.h"
 
 void panic(char *s)
 {
@@ -66,8 +68,6 @@ void fatalerror(char *s)
   exit(1);
 }
 
-/* #define panic fatalerror */
-
 int get_input();
 void emit_PS();
 
@@ -77,11 +77,11 @@ void emit_PS();
 
 typedef enum {CENTERED, ABOVE, BELOW, TO_THE_LEFT, TO_THE_RIGHT} position; 
 
-/* dXpoint is just like Xpoint but uses doubles instead instead of shorts.
+/* dXPoint is just like Xpoint but uses doubles instead instead of shorts.
 */
 typedef struct { double x,y; } dXPoint;
 
-/* lXpoint is just like Xpoint but uses longs instead instead of shorts.
+/* lXPoint is just like Xpoint but uses longs instead instead of shorts.
    We need the extra bits to do Postscript stuff in emit_PS() below. 
 */
 typedef struct { int x,y; } lXPoint;
@@ -106,10 +106,10 @@ static lXPoint lXPoint_from_dXPoint(dXPoint dxp)
  64 - malloc overhead (on a mips)
 */
 
-#define NCOLORS 9
+#define NCOLORS 10
 char *ColorNames[NCOLORS] =
 {
-"white", "green", "red", "blue", "yellow", "purple", "orange", "magenta", "pink"
+"white", "green", "red", "blue", "yellow", "purple", "orange", "magenta", "pink", "gray20"
 };
 char *GrayPSrep[NCOLORS] =
 {
@@ -121,10 +121,12 @@ char *GrayPSrep[NCOLORS] =
   ".6 setgray",			/* purple infreq */
   ".8 setgray",
   ".4 setgray",
-  ".95 setgray"};
+  ".95 setgray",
+  ".2 setgray"			/* 20% gray */
+};
 char *ColorPSrep[NCOLORS] =
 {
-"0 setgray", "0 1 0 setrgbcolor", "1 0 0 setrgbcolor", "0 0 1 setrgbcolor", "1 1 0 setrgbcolor", "0 1 1 setrgbcolor", "1 .5 0 setrgbcolor", "0 .5 1 setrgbcolor", "1 .5 .5 setrgbcolor"
+"0 setgray", "0 1 0 setrgbcolor", "1 0 0 setrgbcolor", "0 0 1 setrgbcolor", "1 1 0 setrgbcolor", "0 1 1 setrgbcolor", "1 .5 0 setrgbcolor", "0 .5 1 setrgbcolor", "1 .5 .5 setrgbcolor", "0.2 0.2 0.2 setrgbcolor"
 };
 
 int	NColors = NCOLORS;
@@ -151,7 +153,7 @@ typedef struct command_struct {
   char *text;
 } command;
 
-#define NUMVIEWS 20
+#define NUMVIEWS 30
 
 #define pl_x_left   pl->x_left[pl->viewno]
 #define pl_x_right  pl->x_right[pl->viewno]
@@ -201,7 +203,7 @@ typedef struct plotter {
 		  ZOOM, HZOOM, VZOOM,
 		  DRAG, HDRAG, VDRAG,
 		  EXITING, PRINTING, FIGING, THINFIGING,
-		  BACKINGUP,
+		  ADVANCING, BACKINGUP,
 		  WEDGED} state;
   struct plotter *master; /* pointer to master when in SLAVE state */
   enum plstate master_state; /* state of master when in SLAVE state */
@@ -218,10 +220,14 @@ typedef struct plotter {
   lXPoint master_pointer;
   xpcolor_t default_color;
   xpcolor_t current_color;
+  XColor foreground_color;
+  XColor background_color;
+  bool thick;
 } *PLOTTER;
 
 PLOTTER the_plotter_list;
 
+int option_thick;
 int option_mono;
 int global_argc;
 char **global_argv;
@@ -233,6 +239,7 @@ command *new_command(struct plotter *pl)
   command *c;
   
   c = (command *) malloc(sizeof(command));
+  if (c == 0) fatalerror("malloc returned null");
   c->decoration = FALSE;
 #ifdef WINDOW_COORDS_IN_COMMAND_STRUCT
   c->a.x = 0;
@@ -455,7 +462,7 @@ char *append_strings_with_space_freeing_first(char *s1, char *s2)
     return s1;
   len = strlen(s1) + 1 + len2 + 1;
   r = (char *) malloc(len);
-  if (r == 0) panic("malloc returned null");
+  if (r == 0) fatalerror("malloc returned null");
   strcpy(r, s1);
   strcat(r, " ");
   strcat(r, s2);
@@ -647,6 +654,7 @@ void new_plotter(FILE *fp, Display *dpy, int numtiles, int tileno, int lineno)
   do {
   
     pl = (PLOTTER) malloc(sizeof(*pl));
+    if (pl == 0) fatalerror("malloc returned null");
     pl->next = the_plotter_list;
     the_plotter_list = pl;
   
@@ -694,6 +702,7 @@ void new_plotter(FILE *fp, Display *dpy, int numtiles, int tileno, int lineno)
     pl->clean = 0;
     pl->default_color = -1;
     pl->current_color = -1;
+    pl->thick = option_thick? TRUE: FALSE;
 
     r = get_input(fp, dpy, lineno, pl);
     lineno = r;
@@ -705,7 +714,7 @@ void display_plotter(PLOTTER pl)
 {
   XSetWindowAttributes attr;
   Window rootwindow;
-  
+
   if (pl->win != 0) {
     fprintf(stderr,
 	    "display_plotter called for already-displayed plotter\n");
@@ -713,9 +722,49 @@ void display_plotter(PLOTTER pl)
   }
 
   rootwindow = XRootWindowOfScreen(pl->screen);
-  
-  attr.background_pixel = BlackPixelOfScreen(pl->screen);
-  attr.border_pixel     = WhitePixelOfScreen(pl->screen);
+
+  /* set up foreground/background colors */
+
+  {
+    Colormap default_cmap = DefaultColormap(pl->dpy, DefaultScreen(pl->dpy));
+    char *foreground_color_name;
+    char *background_color_name;
+    XColor exact_return;
+    int i;
+
+    foreground_color_name = XGetDefault(pl->dpy, global_argv[0], "foreground");
+    if (!foreground_color_name) foreground_color_name = "white";
+    i = XAllocNamedColor(pl->dpy, default_cmap, foreground_color_name,
+			 &exact_return, &pl->foreground_color);
+    if (i < 0)
+    {
+      fprintf(stderr, "XAllocNamedColor failed for %s: %d\n",
+	      foreground_color_name, i);
+      return;
+    }
+
+#if 0
+    ColorNames[0] = strdup(foreground_color_name);
+#else
+    ColorNames[0] = (char *) malloc(strlen(foreground_color_name) + 1);
+    if (ColorNames[0] == NULL) fatalerror("malloc returned null");
+    strcpy(ColorNames[0], foreground_color_name);
+#endif
+
+    background_color_name = XGetDefault(pl->dpy, global_argv[0], "background");
+    if (!background_color_name) background_color_name = "black";
+    i = XAllocNamedColor(pl->dpy, default_cmap, background_color_name,
+			 &exact_return, &pl->background_color);
+    if (i < 0)
+    {
+      fprintf(stderr, "XAllocNamedColor failed for %s: %d\n",
+	      background_color_name, i);
+      return;
+    }
+  }      
+        
+  attr.background_pixel = pl->background_color.pixel;
+  attr.border_pixel     = pl->foreground_color.pixel;
   attr.event_mask       = ButtonReleaseMask|ButtonPressMask|ExposureMask|
     EnterWindowMask|LeaveWindowMask|PointerMotionMask|PointerMotionHintMask|
     StructureNotifyMask|VisibilityChangeMask;
@@ -740,9 +789,24 @@ void display_plotter(PLOTTER pl)
     int x = 10, y = 70, borderw = 1;
     unsigned int width = 400, height = 400;
     int flags = 0;
+    int i;
     
+    for (i = 1 ; i < global_argc ; i++) {
+      if (strcmp("-geometry", global_argv[i]) == 0) {
+	if (i+1 < global_argc) {
+	  geom = global_argv[i+1];
+	  break;
+	} else {
+	  static int virgin = 1;
+	  if (virgin) {
+	    fprintf(stderr, "-geometry on command line without any following argument\n");
+	    virgin = 0;
+	  }
+	}
+      }
+    }
     if (geom)
-      {
+     {
 	flags = XParseGeometry (geom, &x, &y, &width, &height);
 	if (flags & XValue)
 	  {
@@ -801,11 +865,15 @@ void display_plotter(PLOTTER pl)
     pl->font_struct = XLoadQueryFont(pl->dpy, use_font ? use_font : "fixed");
   }
   
-  pl->gcv.foreground = WhitePixelOfScreen(pl->screen);
-  pl->gcv.background = BlackPixelOfScreen(pl->screen);
+  pl->gcv.foreground = pl->foreground_color.pixel;
+  pl->gcv.background = pl->background_color.pixel;
   pl->gcv.font = pl->font_struct->fid;
   pl->gcv.line_width = 0;
   pl->gcv.cap_style = CapProjecting;
+  if (pl->thick) {
+    pl->gcv.line_width = 3;
+    pl->gcv.cap_style = CapRound;
+  }
   
   {
 #define N_DPY_S 2
@@ -813,10 +881,12 @@ void display_plotter(PLOTTER pl)
     static struct dpy_info {
       unsigned long line_plane_mask;
       Colormap clr_map;
+      int depth;
       XColor clr;
       unsigned long pixel[NCOLORS];
       int Colors[NCOLORS];
       int virgin;
+      int warned_color_alloc_failed;
       Atom xplot_nagle_atom;
       Display *saved_dpy;
     } d_i[N_DPY_S];
@@ -842,38 +912,87 @@ void display_plotter(PLOTTER pl)
     /* Allocate some color cells */
       
     if (d_i[d].virgin ) {
+      int ci;
+
       d_i[d].virgin = 0;
       
       d_i[d].xplot_nagle_atom = XInternAtom(pl->dpy, "XPLOT_NAGLE", False);
 
       d_i[d].clr_map = DefaultColormap(pl->dpy, DefaultScreen(pl->dpy));
       
-      if ( option_mono ||
+      d_i[d].depth = DisplayPlanes(pl->dpy, DefaultScreen(pl->dpy));
 
-	   ! XAllocColorCells(pl->dpy, 
-			      d_i[d].clr_map, 0,
-			      &d_i[d].line_plane_mask, 1,
-			      d_i[d].pixel, NColors) )
+      ci = 0;
+
+      /* if display/screen has only 1 bit of depth, don't try to
+       * allocate any colors - just use BlackPixel and WhitePixel
+       */
+      if ( ! option_mono && d_i[d].depth > 1
+	   && XAllocColorCells(pl->dpy, 
+			       d_i[d].clr_map, 0,
+			       &d_i[d].line_plane_mask, 1,
+			       d_i[d].pixel, NColors)
+	   )
 	{
-	  /* probably only one bit plane, or all the color cells are taken */
-#if 1
-	  if (! option_mono)
-	    fputs("XAllocColorCells failed, will only have one plot color\n",
-		  stderr);
-#endif
-	  for ( i = 0; i < NColors; i++) {
-	    d_i[d].Colors[i] = WhitePixelOfScreen(pl->screen);
-	  }
-	} else {
-	  for (i = 0; i < NColors; i++)  {
-	    XParseColor(pl->dpy, d_i[d].clr_map, ColorNames[i], &d_i[d].clr);
-	    d_i[d].clr.pixel = d_i[d].pixel[i];
+	  for ( ; ci < NColors; ci++)  {
+	    XParseColor(pl->dpy, d_i[d].clr_map, ColorNames[ci], &d_i[d].clr);
+	    d_i[d].clr.pixel = d_i[d].pixel[ci];
 	    XStoreColor (pl->dpy, d_i[d].clr_map, &d_i[d].clr);
 	    d_i[d].clr.pixel |= d_i[d].line_plane_mask;
 	    XStoreColor (pl->dpy, d_i[d].clr_map, &d_i[d].clr);
-	    d_i[d].Colors[i] = d_i[d].clr.pixel;
+	    d_i[d].Colors[ci] = d_i[d].clr.pixel;
+	  }
+
+	} else if (! option_mono && d_i[d].depth > 1 ) {
+	  /* some visual types (e.g. TrueColor) do not support XAllocColorCells */
+
+	  for ( ; ci < NColors; ci++) {
+	    XColor exact_return;
+
+	    i = XAllocNamedColor(pl->dpy, d_i[d].clr_map, ColorNames[ci],
+				 &exact_return, &d_i[d].clr);
+	    if ( i < 0 )
+	      {
+		fprintf(stderr, "XAllocNamedColor failed for %s: %d\n",
+			ColorNames[i], i);
+		break;
+	      }
+
+	    /* Here, we should check if the color is close enough. */
+	    d_i[d].Colors[ci] = d_i[d].clr.pixel;
+
+#if 0
+	    /***** and on any failure, you should break out of this
+	      loop leaving ci pointing at the first color (perhaps
+	      zero) of the first color you've failed to allocate. */
+
+	    /***** need to take care that this does the correct thing
+	      on one-bit-plane displays.    There are two ways that this might occur:
+	    
+	      1. All pixel values obtained in this loop on a
+	      one-bit-plane display are the same as WhitePixelOfScreen()
+
+	      or
+	      
+	      2. On a one-bitplane display we break out of this loop
+	      and leave the loop below to fill in WhitePixelOfScreen()
+	      for each plot color.
+	      */
+#endif
 	  }
 	}
+      for ( ; ci < NColors; ci++) {
+
+	/* probably only one bit plane, or all the color cells are taken
+	   (or option_mono)*/
+
+	if (!d_i[d].warned_color_alloc_failed && !option_mono) {
+	  fputs("unable to get all desired colors, will substitute white for some or all colors\n",
+		stderr);
+	  d_i[d].warned_color_alloc_failed = 1;
+	}
+	d_i[d].Colors[ci] = WhitePixelOfScreen(pl->screen);
+      }
     }
     
     for (i = 0; i < NColors; i++) {
@@ -921,13 +1040,22 @@ int undisplay_plotter(PLOTTER pl, int direction)
   
   if (direction == 1) {
     pll = pl->next;
+    if (pll == 0) {
+      pll = the_plotter_list;
+    }
   } else if (direction == -1) {
     pll = the_plotter_list; 
-    while (pll) {
-      if (pll->next == pl) {
-	break;
+    if (pl != the_plotter_list) {
+      while (pll) {
+	if (pll->next == pl) {
+	  break;
+	}
+	pll = pll->next;
       }
-      pll = pll->next;
+    } else {
+      /* go to last plotter on list */
+      while (pll->next)
+	pll = pll->next;
     }
   } else {
     pll = 0;
@@ -1199,6 +1327,10 @@ int main(int argc, char *argv[])
 	|| strcmp ("-version", argv[i]) == 0) {
       extern char* version_string;
       printf("xplot version %s\n", version_string);
+#if 0
+      printf("sizeof command is %d\n", sizeof(command));
+      printf("sizeof plotter is %d\n", sizeof(struct plotter));
+#endif
       exit(0);
     }
   }
@@ -1212,6 +1344,8 @@ int main(int argc, char *argv[])
 	x_synch = TRUE;
       else if (strcmp ("-y", argv[i]) == 0)
 	y_synch = TRUE;
+      else if (strcmp ("-thick", argv[i]) == 0)
+	option_thick = TRUE;
       else if (strcmp ("-tile", argv[i]) == 0)
 	option_tile = TRUE;
       else if (strcmp ("-mono", argv[i]) == 0)
@@ -1458,6 +1592,7 @@ int main(int argc, char *argv[])
       int visible_count = 0;
       for (ALLPLOTTERS) {
 
+#if 0
 	/* if option_one_at_a_time, ensure that at least last plotter
 	   on list is visible if no others are */ 
 	if (visible_count == 0
@@ -1466,7 +1601,7 @@ int main(int argc, char *argv[])
 	    && option_one_at_a_time
 	    ) 
 	  display_plotter(pl);
-
+#endif
 	/* if plotter is not yet displayed, do nothing */
 	if (pl->win == 0) continue;
 
@@ -1708,7 +1843,7 @@ int main(int argc, char *argv[])
 		    XDrawSegments(pl->dpy, pl->win, gc, segs, 4);
 		  }
 		  break;
-#define D 3
+#define D (pl->thick? 6: 3)
 		case UTICK:
 		  XDrawLine(pl->dpy, pl->win, gc, a.x, a.y, a.x, a.y-D);
 		  break;
@@ -1728,7 +1863,7 @@ int main(int argc, char *argv[])
 		  XDrawLine(pl->dpy, pl->win, gc, a.x, a.y-D, a.x, a.y+D);
 		  break;
 #undef D
-#define D 2
+#define D (pl->thick? 4: 2)
 		case UARROW:
 		  XDrawLine(pl->dpy, pl->win, gc, a.x - D, a.y + D, a.x, a.y);
 		  XDrawLine(pl->dpy, pl->win, gc, a.x + D, a.y + D, a.x, a.y);
@@ -1941,14 +2076,23 @@ int main(int argc, char *argv[])
 	      pl->state = DRAG;
 	  break;
 	case Button3:
-	  if (event.xbutton.state & ShiftMask)
-	    if (option_one_at_a_time) {
-	      pl->state = BACKINGUP;
-	    } else {
-	      pl->state = THINFIGING;
-	    }
-	  else
+	  if (event.xbutton.state & ControlMask) {
 	    pl->state = EXITING;
+	  } else {
+	    if (option_one_at_a_time) {
+	      if (event.xbutton.state & ShiftMask) {
+		pl->state = BACKINGUP;
+	      } else {
+		pl->state = ADVANCING;
+	      }
+	    } else {
+	      if (event.xbutton.state & ShiftMask) {
+		pl->state = THINFIGING;
+	      } else {
+		pl->state = EXITING;
+	      }
+	    }
+	  }
 	  break;
 	default:
 	  pl->state = WEDGED;
@@ -2046,6 +2190,7 @@ int main(int argc, char *argv[])
       case PRINTING:
       case FIGING:
       case THINFIGING:
+      case ADVANCING:
       case BACKINGUP:
 	pl->state = WEDGED;
 	break;
@@ -2336,17 +2481,7 @@ int main(int argc, char *argv[])
         break;
       case EXITING:
 	pl->state = NORMAL;  
-	if (undisplay_plotter(pl, option_one_at_a_time?-1:0) == 0) {
-	  /* went past last plotter */
-	  if (option_one_at_a_time == 0) {
-	    
-	    /* old behavior */
-
-	  } else {
-	    /* we'll loop around, and start at the beginning with a
-               new window */
-	  }
-	}
+	undisplay_plotter(pl, 0);
 	break;
       case PRINTING:
       case FIGING:
@@ -2361,15 +2496,13 @@ int main(int argc, char *argv[])
 	}
         pl->state = NORMAL;
         break;
+      case ADVANCING:
+	pl->state = NORMAL;
+	undisplay_plotter(pl, -1);
+	break;
       case BACKINGUP:
 	pl->state = NORMAL;
-	if (undisplay_plotter(pl, option_one_at_a_time?1:0) == 0) {
-	  /* trying to back up before first plotter */
-
-	  /* display the last plotter (the first on the list) */
-	  if (option_one_at_a_time) 
-	    display_plotter(the_plotter_list);
-	}
+	undisplay_plotter(pl, 1);
 	break;
       case WEDGED:
 	if (pl->buttonsdown == 0)
@@ -2423,6 +2556,11 @@ int main(int argc, char *argv[])
 	pl->state = WEDGED;
 	break;
       }
+      if ( pl->size.x == 0 || pl->size.y == 0 )
+	{
+	  fprintf(stderr, "MotionNotify while size is zero ignored.\n");
+	  break;
+	}
       pl->pointer_marks = detent(pl, pl->pointer);
 
       if (pl->state != SLAVE) {
@@ -2448,6 +2586,7 @@ int main(int argc, char *argv[])
 	
 	for (ALLPLOTTERS) {
 	  if (pl == savepl) continue;
+	  if (pl->win == 0) continue; /* -1 commandline option. Is this correct? */
 
 	  if (pl->slave_draw_in_progress) {
 	    pl->slave_motion_pending = TRUE;
@@ -2834,6 +2973,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
 
       com = new_command(pl);
@@ -2848,6 +2988,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
       com = new_command(pl);
       com->type = TEXT;
@@ -2865,6 +3006,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
       com = new_command(pl);
       com->type = TEXT;
@@ -2882,6 +3024,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
       com = new_command(pl);
       com->type = TEXT;
@@ -2899,6 +3042,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
       com = new_command(pl);
       com->type = TEXT;
@@ -2916,6 +3060,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
       com = new_command(pl);
       com->type = TEXT;
@@ -2932,6 +3077,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
 
       com = new_command(pl);
@@ -2945,6 +3091,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
 
       com = new_command(pl);
@@ -2958,6 +3105,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
 
       pl->x_units = cp;
@@ -2969,6 +3117,7 @@ int get_input(FILE *fp, Display *dpy, int lineno, struct plotter *pl)
       for (cp=buf;*cp != '\0';cp++)
 	if (*cp == '\n') { *cp = '\0'; break; }
       cp = malloc((unsigned)strlen(buf) + 1);
+      if (cp == 0) fatalerror("malloc returned null");
       (void) strcpy(cp, buf);
 
       pl->y_units = cp;
@@ -3040,12 +3189,14 @@ void emit_PS(struct plotter *pl, FILE *fp, enum plstate state)
   cc = (command *) &pspl.commands;
   for (c = pl->commands; c != NULL; c = c->next)  {
     cc->next = (command *) malloc(sizeof(command));
+    if (cc->next == 0) fatalerror("malloc returned null");
     *cc->next = *c;
     cc = cc->next;
     cc->next = NULL;
     /* If it is text, copy that too. */
     if (c->type == TEXT || c->type == TITLE)  {
       cc->text = malloc((unsigned)strlen(c->text) + 1);
+      if (cc->text == 0) fatalerror("malloc returned null");
       (void) strcpy(cc->text, c->text);
     }
   }
@@ -3058,10 +3209,13 @@ void emit_PS(struct plotter *pl, FILE *fp, enum plstate state)
 #endif
 
   /* Because xplot only deals with integer output coords, use PS units
-   * of 1/300 of an inch, rather than 1 point.
+   * which are a multiple of the pixels per inch of the actual printer.
+   * By doing so, some undesirable effects are avoided.
+   * 7200 is the least common multiple of 1440 and 1200.
+   * There is some code below that just might depend on this being
+   * a multiple of 600.   So think carefully if you are tuning this.
    */
-#define PER_INCH 600
-
+#define PER_INCH 7200
 
   /* Calculate new window coordinates for everything. */
   { 
@@ -3180,11 +3334,11 @@ void emit_PS(struct plotter *pl, FILE *fp, enum plstate state)
 %6 1 roll
 %matrix astore setmatrix
 
-0.12 dup scale
-
 ", fp);
 
-  fprintf(fp, "/theta {%d mul} def\n", ( (state == PRINTING) ? 4 : 2));
+  fprintf(fp, "72 %d div dup scale\n", PER_INCH);
+
+  fprintf(fp, "/theta {%d mul} def\n", ( (state == PRINTING) ? PER_INCH/150 : PER_INCH/300));
 
   /* Set up units of measurement. */
   fprintf(fp, "/inch {%d mul} def\n", PER_INCH);
@@ -3242,10 +3396,6 @@ end
 /x {moveto 8 8 rlineto -16 -16 rlineto
     8 8 rmoveto
     -8 8 rlineto 16 -16 rlineto} def
-% x y + --
-/+ {moveto 0 8 rlineto 0 -16 rlineto
-    0 8 rmoveto
-    -8 0 rlineto 16 0 rlineto} def
 % x y ?arrow --
 /darrow {moveto 8 theta 8 theta rmoveto -8 theta -8 theta rlineto
          -8 theta 8 theta rlineto } def
@@ -3263,8 +3413,8 @@ end
 %/dot {stroke 8 theta 0 360 arc fill} def
 % end gdt mod
 %x y plus --
-/plus {moveto -16 theta 0 rmoveto 16 theta 0 rlineto 
-       -16 theta -16 theta rmoveto 0 16 theta rlineto} def
+/plus {moveto -8 theta 0 rmoveto 16 theta 0 rlineto 
+       -8 theta -8 theta rmoveto 0 16 theta rlineto} def
 %x y box --
 /box {moveto -8 theta -8 theta rmoveto
       16 theta 0 rlineto 
@@ -3362,7 +3512,7 @@ notintex { 1.5 inch 5.0 inch translate } if
   /* Move origin to create left & bottom margins. */
   fprintf(fp, "%g inch %g inch translate\n", lmargin, bmargin);
   /* Relatively thick lines for axes & ticks. */
-  fputs("0.5 pt theta setlinewidth newpath\n", fp);
+  fputs("4 theta setlinewidth newpath\n", fp);
 
   fputs("\n% The actual drawing:\n\n", fp);
 
@@ -3386,8 +3536,9 @@ notintex { 1.5 inch 5.0 inch translate } if
     {
     if ( finished_decoration && output_decoration == FALSE )  {
       /* Thinner lines for the actual drawing. */
-      fputs("stroke 1 theta setlinewidth\n", fp);
-      fprintf(fp, "/theta {%d mul} def\n", ( (state == PRINTING) ? 2 : 1));
+      fputs("stroke\n", fp);
+      fprintf(fp, "/theta {%d mul} def\n", ( (state == PRINTING) ? PER_INCH/300 : PER_INCH/600));
+      fputs("2 theta setlinewidth\n", fp);
       fputs("dotsetup\n", fp);	/* gdt */
       /* Set clipping region so that we don't draw past the axes. */
       fprintf(fp, "0 0 moveto %d 0 lineto %d %d lineto\n",
@@ -3574,6 +3725,7 @@ make_name_open_file(struct plotter *pl)
     if (c->type == TITLE && name == NULL)  {
       /* Allow space for the number. */
       name = malloc((unsigned)strlen(c->text) + 15);
+      if (name == 0) fatalerror("malloc returned null");
 #if 0
       (void) strcpy(name, c->text);
 #else
@@ -3601,6 +3753,7 @@ make_name_open_file(struct plotter *pl)
   /* If no title found, just call it "xplot" */
   if (!name)  {
     name = malloc(sizeof("xplot") + 15);
+    if (name == 0) fatalerror("malloc returned null");
     (void) strcpy(name, "xplot");
   }
 
