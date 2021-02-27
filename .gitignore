@@ -1,0 +1,12 @@
+# xplot
+Makefile
+config.cache
+config.h
+config.log
+config.status
+version_string.c
+*.o
+xplot
+
+# macOS
+.DS_Store
