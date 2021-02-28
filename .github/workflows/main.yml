@@ -1,0 +1,17 @@
+name: Ubuntu build
+
+on: [push]
+
+jobs:
+  build:
+    name: Build on Ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install X11
+        run: sudo apt-get install -y xorg
+
+      - name: build
+        run: ./configure && make
