@@ -21,10 +21,12 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get install -y xorg
 
-      - name: Build on Ubuntu
-        run: ./configure && make
-
       - name: Build on macOS
+        if: runner.os == 'macOS'
         run: |
           ./configure --x-includes=/opt/X11/include --x-libraries=/opt/X11/lib
           make
+
+      - name: Build on Ubuntu
+        if: runner.os == 'Linux'
+        run: ./configure && make
