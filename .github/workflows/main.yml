@@ -15,7 +15,7 @@ jobs:
 
       - name: Install X11 on macOS
         if: runner.os == 'macOS'
-        run: brew cask install xquartz
+        run: brew install xquartz
 
       - name: Install X11 on Ubuntu
         if: runner.os == 'Linux'
