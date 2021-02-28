@@ -1,10 +1,10 @@
-name: Ubuntu build
+name: Build
 
 on: [push]
 
 jobs:
   build:
-    name: Test on ${{ matrix.os }}
+    name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -21,6 +21,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get install -y xorg
 
+      # consolidate macOS and Ubuntu builds after fixing ./configure on macOS
       - name: Build on macOS
         if: runner.os == 'macOS'
         run: |
