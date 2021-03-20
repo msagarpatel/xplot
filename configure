@@ -954,7 +954,7 @@ EOF
     # GNU make sometimes prints "make[1]: Entering...", which would confuse us.
     eval `${MAKE-make} acfindx 2>/dev/null | grep -v make`
     # Open Windows xmkmf reportedly sets LIBDIR instead of USRLIBDIR.
-    for ac_extension in a so sl; do
+    for ac_extension in a so sl dylib; do
       if test ! -f $ac_im_usrlibdir/libX11.$ac_extension &&
         test -f $ac_im_libdir/libX11.$ac_extension; then
         ac_im_usrlibdir=$ac_im_libdir; break
@@ -1112,7 +1112,7 @@ for ac_dir in `echo "$ac_x_includes" | sed s/include/lib/` \
     /usr/openwin/share/lib \
     ; \
 do
-  for ac_extension in a so sl; do
+  for ac_extension in a so sl dylib; do
     if test -r $ac_dir/lib${x_direct_test_library}.$ac_extension; then
       ac_x_libraries=$ac_dir
       break 2
