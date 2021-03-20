@@ -4,7 +4,7 @@ on: [push]
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
+    name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -21,13 +21,5 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get install -y xorg
 
-      # consolidate macOS and Ubuntu builds after fixing ./configure on macOS
-      - name: Build on macOS
-        if: runner.os == 'macOS'
-        run: |
-          ./configure --x-includes=/opt/X11/include --x-libraries=/opt/X11/lib
-          make
-
-      - name: Build on Ubuntu
-        if: runner.os == 'Linux'
+      - name: Build
         run: ./configure && make
