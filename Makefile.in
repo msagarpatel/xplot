@@ -78,6 +78,10 @@ install: all
 clean:
 	rm -f ${PROG} ${PROG}.old *.o version_string.c
 
+uninstall:
+	cd $(bindir); $(RM) xplot tcpdump2xplot
+	cd $(mandir); $(RM) $(MANFILES)
+
 # (note: "mkdep" below denotes the BSD 4.3+tahoe /usr/bin/mkdep )
 depend:
 	mkdep ${INCLUDES} ${CFILES}
