@@ -1,6 +1,6 @@
 # xplot for macOS
 
-This project takes the most recent version of xplot (v0.90.7.1 from Sept. 19,
+This project takes the most recent version of Tim Shepard's xplot program (v0.90.7.1 from Sept. 19,
 2003!), and ports it forward so xplot may be built on macOS. The original source
 of xplot was taken from [xplot.org](http://xplot.org). Only the most minimal
 changes required to build, install, run, and uninstall xplot on macOS have been
